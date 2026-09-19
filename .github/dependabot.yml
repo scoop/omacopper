@@ -1,0 +1,13 @@
+version: 2
+updates:
+    # Development tooling only — the plugin ships no runtime dependencies. It
+    # runs on what Omarchy already provides: Quickshell, wl-clipboard.
+    - package-ecosystem: npm
+      directory: /
+      schedule:
+          interval: weekly
+      open-pull-requests-limit: 5
+    - package-ecosystem: github-actions
+      directory: /
+      schedule:
+          interval: weekly
