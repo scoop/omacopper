@@ -1,0 +1,421 @@
+import Quickshell
+import Quickshell.Io
+import Quickshell.Wayland
+import QtQuick
+import QtQuick.Controls
+import qs.Commons
+import qs.Ui
+import "src/store.js" as Store
+import "src/config.js" as Config
+
+// The Panel. Everything with logic lives in src/; this file is glue between
+// the shell (summon/hide), the Store file, wl-paste/wl-copy and the widgets.
+Item {
+  id: root
+
+  property string omarchyPath: Quickshell.env("OMARCHY_PATH")
+  property var shell: null
+  property var manifest: null
+
+  readonly property string home: Quickshell.env("HOME")
+  readonly property string pluginId: (manifest && manifest.id) || "scoop.omacopper"
+
+  property bool opened: false
+  property var blocks: []
+  property string storePath: Config.defaultStorePath(home)
+  // -1 while the editor owns the keyboard; otherwise the row under the cursor.
+  property int selectedIndex: -1
+
+  // Shares the [menu] surface tokens — themes that style the menu style this.
+  property color background: Color.menu.background
+  property color foreground: Color.menu.text
+  property color border: Color.menu.border
+  property var borderSpec: Border.surfaceSpec("menu", "border", border, Math.max(1, Style.space(2)))
+  property color scrim: Color.menu.scrim
+  property color selectedBackground: Color.menu.selectedBackground
+  property color selectedText: Color.menu.selectedText
+  readonly property int cornerRadius: Style.cornerRadius
+  property string fontFamily: Style.font.menuFamily
+  property int contentMargin: Style.spacing.panelPadding
+  property int contentSpacing: Style.spacing.md
+  property int cardWidth: Math.min(Style.space(640), panel.width - Style.gapsOut * 2)
+  property int cardHeight: Math.min(Style.space(560), panel.height - Style.gapsOut * 2)
+  property int editorHeight: Math.round(Style.font.body * 1.5 * 3 + Style.spacing.inputPaddingY * 2)
+
+  function today() { return Qt.formatDate(new Date(), "yyyy-MM-dd") }
+
+  function open(payloadJson) {
+    root.opened = true
+    root.selectedIndex = -1
+    editor.text = ""
+    mkdirProc.running = true
+    storeFile.reload()
+    selectionProc.running = true
+    Qt.callLater(function() { editor.forceActiveFocus() })
+  }
+
+  function close() { root.opened = false }
+
+  function dismiss() {
+    root.opened = false
+    if (root.shell && typeof root.shell.hide === "function") root.shell.hide(root.pluginId)
+  }
+
+  function toggle() {
+    if (root.opened) root.dismiss()
+    else root.open("{}")
+  }
+
+  function loadStore(text) {
+    root.blocks = Store.parseStore(text)
+    root.rebuildRows()
+  }
+
+  function saveStore() {
+    storeFile.setText(Store.serializeStore(root.blocks))
+  }
+
+  // keepBlockIndex: the block the cursor should follow after a rebuild, or -1
+  // to keep the cursor where it is (clamped).
+  function rebuildRows(keepBlockIndex) {
+    var rows = Store.displayRows(root.blocks)
+    var now = root.today()
+    rowsModel.clear()
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].index === keepBlockIndex) root.selectedIndex = i
+      rowsModel.append({
+        blockIndex: rows[i].index,
+        date: rows[i].date,
+        dayLabel: Store.dayLabel(rows[i].date, now),
+        text: rows[i].text,
+        done: rows[i].done
+      })
+    }
+    if (root.selectedIndex >= rowsModel.count) root.selectedIndex = rowsModel.count - 1
+    if (rowsModel.count === 0 && root.opened) root.focusEditor()
+  }
+
+  function capture() {
+    var next = Store.addEntry(root.blocks, root.today(), editor.text)
+    if (next === root.blocks) return
+    root.blocks = next
+    root.saveStore()
+    editor.text = ""
+    root.rebuildRows(-1)
+  }
+
+  function toggleDone(row) {
+    if (row < 0 || row >= rowsModel.count) return
+    var blockIndex = rowsModel.get(row).blockIndex
+    root.blocks = Store.toggleDone(root.blocks, blockIndex)
+    root.saveStore()
+    root.rebuildRows(blockIndex)
+  }
+
+  function removeRow(row) {
+    if (row < 0 || row >= rowsModel.count) return
+    root.blocks = Store.removeEntry(root.blocks, rowsModel.get(row).blockIndex)
+    root.saveStore()
+    root.rebuildRows(-1)
+  }
+
+  function copyBack(row) {
+    if (row < 0 || row >= rowsModel.count) return
+    Quickshell.execDetached(["wl-copy", "--", rowsModel.get(row).text])
+    root.dismiss()
+  }
+
+  function focusEditor() {
+    root.selectedIndex = -1
+    editor.forceActiveFocus()
+  }
+
+  function focusList(index) {
+    if (rowsModel.count === 0) return
+    root.selectedIndex = Math.max(0, Math.min(index, rowsModel.count - 1))
+    keyCatcher.forceActiveFocus()
+    list.positionViewAtIndex(root.selectedIndex, ListView.Contain)
+  }
+
+  function moveCursor(delta) {
+    var next = root.selectedIndex + delta
+    if (next < 0) { root.focusEditor(); return }
+    root.focusList(next)
+  }
+
+  ListModel { id: rowsModel }
+
+  FileView {
+    id: storeFile
+    path: root.storePath
+    atomicWrites: true
+    printErrors: false
+    onLoaded: root.loadStore(text())
+    onLoadFailed: root.loadStore("")
+  }
+
+  FileView {
+    id: shellConfig
+    path: root.home + "/.config/omarchy/shell.json"
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.storePath = Config.storePathFrom(text(), root.pluginId, root.home)
+    onFileChanged: reload()
+  }
+
+  Process {
+    id: mkdirProc
+    command: ["mkdir", "-p", Config.dirname(root.storePath)]
+  }
+
+  Process {
+    id: selectionProc
+    command: ["wl-paste", "--primary", "--no-newline"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var selection = text.trim()
+        if (root.opened && editor.text === "" && selection !== "") {
+          editor.text = selection
+          editor.cursorPosition = editor.length
+        }
+      }
+    }
+  }
+
+  PanelWindow {
+    id: panel
+    visible: root.opened
+    anchors { top: true; bottom: true; left: true; right: true }
+    color: "transparent"
+    WlrLayershell.namespace: "omacopper"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    exclusionMode: ExclusionMode.Ignore
+
+    Rectangle { anchors.fill: parent; color: root.scrim }
+    MouseArea { anchors.fill: parent; onClicked: root.dismiss() }
+
+    BorderSurface {
+      id: card
+      width: root.cardWidth
+      height: root.cardHeight
+      radius: root.cornerRadius
+      anchors.centerIn: parent
+      color: root.background
+      borderSpec: root.borderSpec
+      padding: root.contentMargin
+
+      MouseArea { anchors.fill: parent; onClicked: {} }
+
+      Column {
+        anchors.fill: parent
+        anchors.topMargin: card.contentTopInset
+        anchors.rightMargin: card.contentRightInset
+        anchors.bottomMargin: card.contentBottomInset
+        anchors.leftMargin: card.contentLeftInset
+        spacing: root.contentSpacing
+
+        BorderSurface {
+          width: parent.width
+          height: root.editorHeight
+          radius: root.cornerRadius
+          color: Style.controlFill(editor.activeFocus, false, root.foreground, Color.accent)
+          borderSpec: Border.controlSpec(editor.activeFocus ? "focus" : "normal", root.foreground, Color.accent)
+
+          TextArea {
+            id: editor
+            anchors.fill: parent
+            padding: Style.spacing.inputPaddingY
+            leftPadding: Style.spacing.controlPaddingX
+            rightPadding: Style.spacing.controlPaddingX
+            wrapMode: TextEdit.Wrap
+            placeholderText: "Capture…"
+            placeholderTextColor: Qt.darker(root.foreground, 1.6)
+            color: root.foreground
+            selectionColor: Style.selectionFillFor(root.foreground, Color.accent)
+            selectedTextColor: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+            background: null
+
+            Keys.priority: Keys.BeforeItem
+            Keys.onPressed: function(event) {
+              if (event.key === Qt.Key_Escape) {
+                root.dismiss()
+                event.accepted = true
+              } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && !(event.modifiers & Qt.ShiftModifier)) {
+                root.capture()
+                event.accepted = true
+              } else if (event.key === Qt.Key_Tab) {
+                root.focusList(0)
+                event.accepted = true
+              } else if (event.key === Qt.Key_Down && editor.text === "") {
+                root.focusList(0)
+                event.accepted = true
+              }
+            }
+          }
+        }
+
+        Item {
+          id: keyCatcher
+          width: parent.width
+          height: parent.height - root.editorHeight - hint.height - root.contentSpacing * 2
+
+          Keys.priority: Keys.BeforeItem
+          Keys.onPressed: function(event) {
+            if (event.key === Qt.Key_Escape) {
+              root.dismiss()
+            } else if (event.key === Qt.Key_Up || event.text === "k") {
+              root.moveCursor(-1)
+            } else if (event.key === Qt.Key_Down || event.text === "j") {
+              root.moveCursor(1)
+            } else if (event.key === Qt.Key_Home) {
+              root.focusList(0)
+            } else if (event.key === Qt.Key_End) {
+              root.focusList(rowsModel.count - 1)
+            } else if (event.key === Qt.Key_Space) {
+              root.toggleDone(root.selectedIndex)
+            } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+              root.copyBack(root.selectedIndex)
+            } else if (event.key === Qt.Key_Delete) {
+              root.removeRow(root.selectedIndex)
+            } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+              root.focusEditor()
+            } else if (event.text && event.text.length === 1 && event.text.charCodeAt(0) >= 32 && event.text.charCodeAt(0) !== 127) {
+              root.focusEditor()
+              editor.insert(editor.length, event.text)
+            } else {
+              return
+            }
+            event.accepted = true
+          }
+
+          ListView {
+            id: list
+            anchors.fill: parent
+            model: rowsModel
+            clip: true
+            spacing: Style.space(2)
+            boundsBehavior: Flickable.StopAtBounds
+
+            section.property: "dayLabel"
+            section.criteria: ViewSection.FullString
+            section.delegate: Text {
+              required property string section
+              textFormat: Text.PlainText
+              width: ListView.view ? ListView.view.width : root.cardWidth
+              topPadding: Style.space(10)
+              bottomPadding: Style.space(4)
+              leftPadding: Style.space(12)
+              text: section
+              color: root.foreground
+              opacity: 0.6
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.capitalization: Font.AllUppercase
+            }
+
+            delegate: Rectangle {
+              id: row
+              required property int index
+              required property string text
+              required property bool done
+
+              readonly property bool hasCursor: index === root.selectedIndex
+
+              width: ListView.view.width
+              height: body.implicitHeight + Style.space(16)
+              radius: root.cornerRadius
+              color: hasCursor ? root.selectedBackground : "transparent"
+
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.focusList(row.index)
+                onDoubleClicked: root.copyBack(row.index)
+              }
+
+              Row {
+                anchors.fill: parent
+                anchors.leftMargin: Style.space(12)
+                anchors.rightMargin: Style.space(12)
+                anchors.topMargin: Style.space(8)
+                anchors.bottomMargin: Style.space(8)
+                spacing: Style.space(10)
+
+                Text {
+                  id: box
+                  text: row.done ? "󰄵" : "󰄱"
+                  color: row.hasCursor ? root.selectedText : root.foreground
+                  opacity: row.done ? 0.5 : 1
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.title
+                  MouseArea {
+                    anchors.fill: parent
+                    anchors.margins: -Style.space(6)
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.toggleDone(row.index)
+                  }
+                }
+
+                Text {
+                  id: body
+                  textFormat: Text.PlainText
+                  width: parent.width - box.width - parent.spacing
+                  text: row.text
+                  color: row.hasCursor ? root.selectedText : root.foreground
+                  opacity: row.done ? 0.5 : 1
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                  font.strikeout: row.done
+                  wrapMode: Text.Wrap
+                  maximumLineCount: 3
+                  elide: Text.ElideRight
+                }
+              }
+            }
+
+            Column {
+              anchors.centerIn: parent
+              visible: rowsModel.count === 0
+              spacing: Style.space(8)
+              Text {
+                text: "󰆐"
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                color: root.selectedText
+                opacity: 0.8
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.displayLarge
+              }
+              Text {
+                textFormat: Text.PlainText
+                text: "Nothing captured yet"
+                color: root.foreground
+                opacity: 0.7
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.title
+              }
+            }
+          }
+        }
+
+        Text {
+          id: hint
+          textFormat: Text.PlainText
+          width: parent.width
+          text: root.selectedIndex < 0
+            ? "Enter save · Shift+Enter newline · Tab list · Esc close"
+            : "Space done · Enter copy · Del remove · Tab edit · Esc close"
+          color: root.foreground
+          opacity: 0.45
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
+        }
+      }
+    }
+  }
+}
