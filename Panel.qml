@@ -391,7 +391,7 @@ Item {
                 else root.capture()
                 event.accepted = true
               } else if (event.key === Qt.Key_Tab) {
-                if (editing) root.cancelEdit()
+                if (editing) root.commitEdit()
                 else root.focusList(0)
                 event.accepted = true
               } else if (event.key === Qt.Key_Down && editor.text === "") {
@@ -559,7 +559,7 @@ Item {
             : root.editorTooLong
               ? "Too long to save · at most " + root.entryMaxChars + " characters"
               : root.editingBlockIndex >= 0
-                ? "Editing · Enter save · Shift+Enter newline · Esc cancel"
+                ? "Editing · Enter or Tab save · Shift+Enter newline · Esc discard"
                 : root.selectedIndex < 0
                   ? "Enter save · Shift+Enter newline · Tab list · Esc close"
                   : "Tab edit · Space done · Enter copy · Del remove · Esc close"

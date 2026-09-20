@@ -47,15 +47,15 @@ currently selected (the primary selection), if any.
 | `Tab`, `↓`        | move to the list (`↓` when empty)    |
 | `Esc`             | close, discarding what was not saved |
 
-| In the list      | Does                                             |
-| ---------------- | ------------------------------------------------ |
-| `↑` `↓`, `k` `j` | move; `↑` past the top returns to the editor     |
-| `Tab`            | edit the entry: `Enter` saves, `Esc` cancels     |
-| `Space`          | toggle done                                      |
-| `Enter`          | copy the entry to the clipboard and close        |
-| `Delete`         | remove the entry, no confirmation                |
-| any letter       | back to the editor, starting a new entry with it |
-| `Esc`            | close                                            |
+| In the list      | Does                                                   |
+| ---------------- | ------------------------------------------------------ |
+| `↑` `↓`, `k` `j` | move; `↑` past the top returns to the editor           |
+| `Tab`            | edit the entry: `Enter` or `Tab` saves, `Esc` discards |
+| `Space`          | toggle done                                            |
+| `Enter`          | copy the entry to the clipboard and close              |
+| `Delete`         | remove the entry, no confirmation                      |
+| any letter       | back to the editor, starting a new entry with it       |
+| `Esc`            | close                                                  |
 
 Newest day first, newest entry first. Done entries sink to the bottom of their
 day and stay there until you delete them.
