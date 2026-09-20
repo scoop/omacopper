@@ -13,7 +13,7 @@ into your Obsidian vault.
 ## Requirements
 
 - Omarchy 4.x (Quickshell shell)
-- `wl-clipboard` — present on a stock Omarchy
+- `wl-clipboard` and `python3` — both present on a stock Omarchy
 
 ## Install
 
@@ -115,10 +115,15 @@ No network, no daemon, no account. Everything is local:
 - **The clipboard**, written with `wl-copy` on Copy-back. The text travels on
   stdin, not as an argument, so it does not appear in `/proc/*/cmdline`.
 
-Every helper runs under `bin/supervise.sh` in its own process group with a
-deadline and a byte ceiling, with a fixed `PATH` and an empty environment apart
-from what Wayland needs. An entry is at most 32,768 characters; the panel shows
-at most 1,000 entries.
+Every helper is started by absolute path with a cleared environment (a fixed
+`PATH`, `HOME`, `LC_ALL` and the two variables Wayland needs). The file and
+selection helpers run under `bin/supervise.sh` in a process group of their own
+with a deadline and a byte ceiling. `wl-copy` is the one exception, because the
+child it forks has to outlive it to serve the clipboard; it runs under
+`timeout` instead. An entry is at most 32,768 characters and the editor cuts a
+longer paste at that point; a row shows at most 2,048 characters of an entry;
+the panel shows at most 1,000 entries. A file that group or others can write
+is refused, like a symlink or a FIFO in its place.
 
 ## Removing
 

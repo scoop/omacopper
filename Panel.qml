@@ -32,6 +32,8 @@ Item {
   readonly property int selectionMaxBytes: 32768
   readonly property int entryMaxChars: 32768
   readonly property int rowsMax: 1000
+  // A row shows three lines at most; what it holds for layout is capped too.
+  readonly property int previewMaxChars: 2048
 
   property bool opened: false
   property var blocks: []
@@ -61,7 +63,8 @@ Item {
   property int cardHeight: Math.min(Style.space(560), panel.height - Style.gapsOut * 2)
   property int editorHeight: Math.round(Style.font.body * 1.5 * 3 + Style.spacing.inputPaddingY * 2)
 
-  readonly property bool editorTooLong: editor.length > root.entryMaxChars
+  // Set when the editor cut a paste or an Entry down to entryMaxChars.
+  property bool editorTrimmed: false
 
   function today() { return Qt.formatDate(new Date(), "yyyy-MM-dd") }
 
@@ -73,6 +76,7 @@ Item {
     root.storeLoaded = false
     root.blocks = []
     rowsModel.clear()
+    root.editorTrimmed = false
     editor.text = ""
     // shell.json first: it decides where the Store is. The selection can be
     // read meanwhile; it only fills the editor.
@@ -125,6 +129,9 @@ Item {
         date: rows[i].date,
         dayLabel: Store.dayLabel(rows[i].date, now),
         text: rows[i].text,
+        preview: rows[i].text.length > root.previewMaxChars
+          ? rows[i].text.slice(0, root.previewMaxChars) + "…"
+          : rows[i].text,
         done: rows[i].done
       })
     }
@@ -133,7 +140,7 @@ Item {
   }
 
   function capture() {
-    if (root.editorTooLong || root.storeError || !root.storeLoaded) return
+    if (root.storeError || !root.storeLoaded) return
     var next = Store.addEntry(root.blocks, root.today(), editor.text)
     if (next === root.blocks) return
     var previous = root.blocks
@@ -162,13 +169,13 @@ Item {
     if (row < 0 || row >= rowsModel.count) return
     var item = rowsModel.get(row)
     root.editingBlockIndex = item.blockIndex
+    root.editorTrimmed = false
     editor.text = item.text
     editor.cursorPosition = editor.length
     root.focusEditor()
   }
 
   function commitEdit() {
-    if (root.editorTooLong) return
     var blockIndex = root.editingBlockIndex
     var next = Store.updateEntry(root.blocks, blockIndex, editor.text)
     if (next !== root.blocks) {
@@ -204,6 +211,14 @@ Item {
   function focusEditor() {
     root.selectedIndex = -1
     editor.forceActiveFocus()
+  }
+
+  // The one ingress with no maximumLength of its own. A paste larger than an
+  // Entry may be is cut at the cap, and the hint says so.
+  function enforceEditorCap() {
+    if (editor.length <= root.entryMaxChars) return
+    editor.remove(root.entryMaxChars, editor.length)
+    root.editorTrimmed = true
   }
 
   function focusList(index) {
@@ -305,7 +320,10 @@ Item {
   Process {
     id: copyProc
     property string payload: ""
-    command: ["/usr/bin/wl-copy"]
+    // The parent wl-copy exits as soon as it has forked the serving child;
+    // timeout is for a compositor that never answers, and only then does its
+    // signal reach the child as well.
+    command: ["/usr/bin/timeout", "-k", "1", "5", "/usr/bin/wl-copy"]
     clearEnvironment: true
     environment: ({
       PATH: "/usr/bin:/bin",
@@ -378,6 +396,9 @@ Item {
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
             background: null
+
+            onLengthChanged: root.enforceEditorCap()
+            onTextChanged: if (root.editorTrimmed && length < root.entryMaxChars) root.editorTrimmed = false
 
             Keys.priority: Keys.BeforeItem
             Keys.onPressed: function(event) {
@@ -466,7 +487,7 @@ Item {
             delegate: Rectangle {
               id: row
               required property int index
-              required property string text
+              required property string preview
               required property bool done
 
               readonly property bool hasCursor: index === root.selectedIndex
@@ -511,7 +532,7 @@ Item {
                   id: body
                   textFormat: Text.PlainText
                   width: parent.width - box.width - parent.spacing
-                  text: row.text
+                  text: row.preview
                   color: row.hasCursor ? root.selectedText : root.foreground
                   opacity: row.done ? 0.5 : 1
                   font.family: root.fontFamily
@@ -556,8 +577,8 @@ Item {
           width: parent.width
           text: root.storeError
             ? root.storeError + " · Esc close"
-            : root.editorTooLong
-              ? "Too long to save · at most " + root.entryMaxChars + " characters"
+            : root.editorTrimmed
+              ? "Cut to " + root.entryMaxChars + " characters, the most an entry can hold"
               : root.editingBlockIndex >= 0
                 ? "Editing · Enter or Tab save · Shift+Enter newline · Esc discard"
                 : root.selectedIndex < 0

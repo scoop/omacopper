@@ -16,7 +16,8 @@ Exit codes:
     2  usage
     3  the file does not exist (read only; the caller treats this as empty)
     4  refused: a component is not what it should be (symlink, FIFO, wrong owner,
-       writable by others, more than one link, ...)
+       writable by others, more than one link, ...). A file that group or
+       others can write is refused too: whoever can write it can write notes.
     5  too large
 
 Directory policy. The plugin's own state directory, ~/.local/share/omacopper,
@@ -142,6 +143,8 @@ def read_bounded(dirfd, name, cap):
     try:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid() or st.st_nlink != 1:
+            fail(4)
+        if st.st_mode & 0o022:
             fail(4)
         if st.st_size > cap:
             fail(5)

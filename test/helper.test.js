@@ -61,6 +61,14 @@ test("refuses a file over the cap rather than truncating it", () => {
     expect(run("read", join(dir, "a.md")).code).toBe(0);
 });
 
+test("refuses a file that group or others can write to", () => {
+    writeFileSync(join(dir, "a.md"), "x");
+    chmodSync(join(dir, "a.md"), 0o666);
+    expect(run("read", join(dir, "a.md")).code).toBe(4);
+    chmodSync(join(dir, "a.md"), 0o644);
+    expect(run("read", join(dir, "a.md")).code).toBe(0);
+});
+
 test("refuses a directory that others can write to", () => {
     const shared = join(dir, "shared");
     mkdirSync(shared);
