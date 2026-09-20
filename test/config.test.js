@@ -31,6 +31,18 @@ test("falls back to the default on missing entry, missing field, or broken JSON"
     expect(storePathFrom("", ID, HOME)).toBe(defaultStorePath(HOME));
 });
 
+test("rejects a storePath the helper would refuse and falls back to the default", () => {
+    const bad = ["relative/notes.md", "/a/../b.md", "/a//b.md", "/a/b\n.md", "/x/./y.md", "/"];
+    for (const p of bad) {
+        expect(
+            storePathFrom(JSON.stringify({ plugins: [{ id: ID, storePath: p }] }), ID, HOME),
+        ).toBe(defaultStorePath(HOME));
+    }
+    expect(
+        storePathFrom(JSON.stringify({ plugins: [{ id: ID, storePath: "~/a b/c.md" }] }), ID, HOME),
+    ).toBe("/home/p/a b/c.md");
+});
+
 test("dirname", () => {
     expect(dirname("/a/b/c.md")).toBe("/a/b");
     expect(dirname("/c.md")).toBe("/");

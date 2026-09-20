@@ -90,7 +90,35 @@ this plugin's entry in `~/.config/omarchy/shell.json`:
 { "id": "scoop.omacopper", "storePath": "~/vaults/Second Brain/Inbox.md" }
 ```
 
-`~` expands to your home. The change takes effect on the next open.
+`~` expands to your home. The path must be absolute, and its directory must
+exist, be owned by you, and not be writable by anyone else; otherwise the panel
+says so and refuses rather than guessing. The change takes effect on the next
+open.
+
+## What it touches
+
+No network, no daemon, no account. Everything is local:
+
+- **The file**, read on every open and rewritten on every change. Reads and
+  writes go through `bin/store.py`, which opens the path once with `O_NOFOLLOW`
+  and `O_NONBLOCK`, checks on the descriptor that it is a regular file owned by
+  you with a single link, and reads at most 1 MiB. Writes go to an exclusively
+  created temporary in the same directory and are renamed over the file, so a
+  symlink planted at the path is replaced rather than written through. A new
+  file is mode 0600; an existing one keeps its permission bits (capped at
+  0644), so a note in a vault stays as readable as it was. The default
+  directory `~/.local/share/omacopper` is created 0700.
+- **`~/.config/omarchy/shell.json`**, read the same way, up to 256 KiB, for
+  `storePath` only. Never written.
+- **The primary selection**, read once per open with `wl-paste`, at most 32
+  KiB, and only to prefill the editor. The clipboard is never read.
+- **The clipboard**, written with `wl-copy` on Copy-back. The text travels on
+  stdin, not as an argument, so it does not appear in `/proc/*/cmdline`.
+
+Every helper runs under `bin/supervise.sh` in its own process group with a
+deadline and a byte ceiling, with a fixed `PATH` and an empty environment apart
+from what Wayland needs. An entry is at most 32,768 characters; the panel shows
+at most 1,000 entries.
 
 ## Removing
 
@@ -98,7 +126,16 @@ this plugin's entry in `~/.config/omarchy/shell.json`:
 omarchy plugin remove scoop.omacopper
 ```
 
-The markdown file, the keybinding and the menu row are yours and stay.
+That deletes the plugin folder. It deliberately leaves:
+
+- **Your file**, `~/.local/share/omacopper/entries.md` or wherever `storePath`
+  points. It is yours; delete it if you want it gone.
+- **`storePath`** on this plugin's entry in `~/.config/omarchy/shell.json`,
+  which removing the plugin from the shell also removes.
+- **The keybinding and the menu row** you added by hand.
+
+Nothing else: no cache, no state directory beyond the file's own, no service,
+timer, hook or scheduled job, and no process that outlives the shell.
 
 ## Developing
 

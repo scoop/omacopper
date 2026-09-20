@@ -17,6 +17,29 @@ function expandHome(path, home) {
     return p;
 }
 
+var MAX_PATH = 4096;
+
+/**
+ * Whether a configured path is one the store helper will accept: absolute,
+ * bounded, no control characters, no `.` or `..` components.
+ *
+ * @param {string} path already home-expanded
+ * @returns {boolean}
+ */
+function acceptablePath(path) {
+    if (typeof path !== "string" || path.length === 0 || path.length > MAX_PATH) return false;
+    if (path.charAt(0) !== "/") return false;
+    for (var i = 0; i < path.length; i++) {
+        var c = path.charCodeAt(i);
+        if (c < 0x20 || c === 0x7f) return false;
+    }
+    var parts = path.split("/");
+    for (var j = 1; j < parts.length; j++) {
+        if (parts[j] === "" || parts[j] === "." || parts[j] === "..") return false;
+    }
+    return true;
+}
+
 /**
  * @param {string} shellJsonText contents of ~/.config/omarchy/shell.json
  * @param {string} pluginId
@@ -35,7 +58,8 @@ function storePathFrom(shellJsonText, pluginId, home) {
         var entry = plugins[i];
         if (!entry || entry.id !== pluginId) continue;
         if (typeof entry.storePath === "string" && entry.storePath.trim()) {
-            return expandHome(entry.storePath.trim(), home);
+            var candidate = expandHome(entry.storePath.trim(), home);
+            return acceptablePath(candidate) ? candidate : defaultStorePath(home);
         }
     }
     return defaultStorePath(home);

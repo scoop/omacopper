@@ -19,7 +19,7 @@ export default [
     {
         files: ["test/**/*.js"],
         languageOptions: {
-            globals: { Bun: "readonly", process: "readonly" },
+            globals: { Bun: "readonly", Buffer: "readonly", process: "readonly" },
         },
     },
 ];

@@ -10,6 +10,11 @@ import "src/config.js" as Config
 
 // The Panel. Everything with logic lives in src/; this file is glue between
 // the shell (summon/hide), the Store file, wl-paste/wl-copy and the widgets.
+//
+// Nothing here touches a file by pathname. The Store and shell.json are read
+// and written by bin/store.py through a validated descriptor, the selection is
+// read by bin/selection.sh with the cap at the producer, and every helper runs
+// under bin/supervise.sh with a deadline and a byte ceiling (BoundedProcess).
 Item {
   id: root
 
@@ -19,10 +24,22 @@ Item {
 
   readonly property string home: Quickshell.env("HOME")
   readonly property string pluginId: (manifest && manifest.id) || "scoop.omacopper"
+  readonly property string pluginDir: Qt.resolvedUrl(".").toString().replace("file://", "")
+
+  // Ceilings. A Store bigger than this is not a scratch list any more.
+  readonly property int storeMaxBytes: 1048576
+  readonly property int configMaxBytes: 262144
+  readonly property int selectionMaxBytes: 32768
+  readonly property int entryMaxChars: 32768
+  readonly property int rowsMax: 1000
 
   property bool opened: false
   property var blocks: []
   property string storePath: Config.defaultStorePath(home)
+  // Set when the Store could not be read; saving is refused until it clears,
+  // so a refused file is never replaced by an empty one.
+  property string storeError: ""
+  property bool storeLoaded: false
   // -1 while the editor owns the keyboard; otherwise the row under the cursor.
   property int selectedIndex: -1
   // Block index of the Entry loaded into the editor for an Edit, else -1.
@@ -44,16 +61,23 @@ Item {
   property int cardHeight: Math.min(Style.space(560), panel.height - Style.gapsOut * 2)
   property int editorHeight: Math.round(Style.font.body * 1.5 * 3 + Style.spacing.inputPaddingY * 2)
 
+  readonly property bool editorTooLong: editor.length > root.entryMaxChars
+
   function today() { return Qt.formatDate(new Date(), "yyyy-MM-dd") }
 
   function open(payloadJson) {
     root.opened = true
     root.selectedIndex = -1
     root.editingBlockIndex = -1
+    root.storeError = ""
+    root.storeLoaded = false
+    root.blocks = []
+    rowsModel.clear()
     editor.text = ""
-    mkdirProc.running = true
-    storeFile.reload()
-    selectionProc.running = true
+    // shell.json first: it decides where the Store is. The selection can be
+    // read meanwhile; it only fills the editor.
+    if (!configProc.running) configProc.running = true
+    if (!selectionProc.running) selectionProc.running = true
     Qt.callLater(function() { editor.forceActiveFocus() })
   }
 
@@ -71,11 +95,20 @@ Item {
 
   function loadStore(text) {
     root.blocks = Store.parseStore(text)
-    root.rebuildRows()
+    root.storeLoaded = true
+    root.rebuildRows(-1)
   }
 
   function saveStore() {
-    storeFile.setText(Store.serializeStore(root.blocks))
+    if (root.storeError || !root.storeLoaded) return false
+    var text = Store.serializeStore(root.blocks)
+    if (text.length > root.storeMaxBytes) {
+      root.storeError = "The file is too large to save"
+      return false
+    }
+    writeProc.payload = text
+    writeProc.running = true
+    return true
   }
 
   // keepBlockIndex: the block the cursor should follow after a rebuild, or -1
@@ -84,7 +117,8 @@ Item {
     var rows = Store.displayRows(root.blocks)
     var now = root.today()
     rowsModel.clear()
-    for (var i = 0; i < rows.length; i++) {
+    var count = Math.min(rows.length, root.rowsMax)
+    for (var i = 0; i < count; i++) {
       if (rows[i].index === keepBlockIndex) root.selectedIndex = i
       rowsModel.append({
         blockIndex: rows[i].index,
@@ -99,10 +133,12 @@ Item {
   }
 
   function capture() {
+    if (root.editorTooLong || root.storeError || !root.storeLoaded) return
     var next = Store.addEntry(root.blocks, root.today(), editor.text)
     if (next === root.blocks) return
+    var previous = root.blocks
     root.blocks = next
-    root.saveStore()
+    if (!root.saveStore()) { root.blocks = previous; return }
     editor.text = ""
     root.rebuildRows(-1)
   }
@@ -132,6 +168,7 @@ Item {
   }
 
   function commitEdit() {
+    if (root.editorTooLong) return
     var blockIndex = root.editingBlockIndex
     var next = Store.updateEntry(root.blocks, blockIndex, editor.text)
     if (next !== root.blocks) {
@@ -155,7 +192,8 @@ Item {
 
   function copyBack(row) {
     if (row < 0 || row >= rowsModel.count) return
-    Quickshell.execDetached(["wl-copy", "--", rowsModel.get(row).text])
+    copyProc.payload = rowsModel.get(row).text
+    copyProc.running = true
     root.dismiss()
   }
 
@@ -179,43 +217,93 @@ Item {
 
   ListModel { id: rowsModel }
 
-  FileView {
-    id: storeFile
-    path: root.storePath
-    atomicWrites: true
-    printErrors: false
-    onLoaded: root.loadStore(text())
-    onLoadFailed: root.loadStore("")
+  // ------------------------------------------------------------- helpers
+
+  // shell.json names the Store. Read bounded like everything else; a refused
+  // or oversized file means the default location, never a guess.
+  BoundedProcess {
+    id: configProc
+    maxBytes: root.configMaxBytes + 1024
+    deadlineSeconds: 10
+    program: ["/usr/bin/python3", "-I", "-S", root.pluginDir + "bin/store.py", "read",
+              root.home + "/.config/omarchy/shell.json", String(root.configMaxBytes)]
+    onFinishedWith: function(text, tooLarge) {
+      var json = lastExitCode === 0 && !tooLarge ? text : ""
+      root.storePath = Config.storePathFrom(json, root.pluginId, root.home)
+      if (root.opened) readProc.running = true
+    }
   }
 
-  FileView {
-    id: shellConfig
-    path: root.home + "/.config/omarchy/shell.json"
-    watchChanges: true
-    printErrors: false
-    onLoaded: root.storePath = Config.storePathFrom(text(), root.pluginId, root.home)
-    onFileChanged: reload()
+  BoundedProcess {
+    id: readProc
+    maxBytes: root.storeMaxBytes + 1024
+    deadlineSeconds: 10
+    program: ["/usr/bin/python3", "-I", "-S", root.pluginDir + "bin/store.py", "read",
+              root.storePath, String(root.storeMaxBytes)]
+    onFinishedWith: function(text, tooLarge) {
+      if (lastExitCode === 0 && !tooLarge) root.loadStore(text)
+      else if (lastExitCode === 3) root.loadStore("")
+      else if (lastExitCode === 5 || tooLarge) root.storeError = "The file is too large to open"
+      else root.storeError = "Refusing to open the file: not a regular file owned by you"
+    }
   }
 
-  Process {
-    id: mkdirProc
-    command: ["mkdir", "-p", Config.dirname(root.storePath)]
+  BoundedProcess {
+    id: writeProc
+    maxBytes: 4096
+    deadlineSeconds: 10
+    property string payload: ""
+    program: ["/usr/bin/python3", "-I", "-S", root.pluginDir + "bin/store.py", "write",
+              root.storePath, String(root.storeMaxBytes)]
+    stdinEnabled: true
+    onStarted: {
+      write(payload)
+      payload = ""
+      stdinEnabled = false
+    }
+    onFinishedWith: function(text, tooLarge) {
+      if (lastExitCode !== 0) root.storeError = "Could not save the file"
+    }
   }
 
-  Process {
+  BoundedProcess {
     id: selectionProc
-    command: ["wl-paste", "--primary", "--no-newline"]
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var selection = text.trim()
-        if (root.opened && editor.text === "" && selection !== "") {
-          editor.text = selection
-          editor.cursorPosition = editor.length
-        }
+    maxBytes: root.selectionMaxBytes + 1
+    deadlineSeconds: 5
+    program: ["/usr/bin/bash", root.pluginDir + "bin/selection.sh", String(root.selectionMaxBytes)]
+    onFinishedWith: function(text, tooLarge) {
+      if (tooLarge || text.length > root.selectionMaxBytes) return
+      var selection = text.trim()
+      if (root.opened && editor.text === "" && selection !== "") {
+        editor.text = selection
+        editor.cursorPosition = editor.length
       }
     }
   }
+
+  // Copy-back. The text travels on stdin, not in argv, where every process on
+  // the machine could read it from /proc. Not supervised: wl-copy forks a
+  // child that serves the clipboard until something replaces it, and that is
+  // the one child that must outlive its parent.
+  Process {
+    id: copyProc
+    property string payload: ""
+    command: ["/usr/bin/wl-copy"]
+    clearEnvironment: true
+    environment: ({
+      PATH: "/usr/bin:/bin",
+      WAYLAND_DISPLAY: Quickshell.env("WAYLAND_DISPLAY"),
+      XDG_RUNTIME_DIR: Quickshell.env("XDG_RUNTIME_DIR")
+    })
+    stdinEnabled: true
+    onStarted: {
+      write(payload)
+      payload = ""
+      stdinEnabled = false
+    }
+  }
+
+  // ------------------------------------------------------------- surface
 
   PanelWindow {
     id: panel
@@ -263,6 +351,7 @@ Item {
             padding: Style.spacing.inputPaddingY
             leftPadding: Style.spacing.controlPaddingX
             rightPadding: Style.spacing.controlPaddingX
+            textFormat: TextEdit.PlainText
             wrapMode: TextEdit.Wrap
             placeholderText: "Capture…"
             placeholderTextColor: Qt.darker(root.foreground, 1.6)
@@ -387,6 +476,7 @@ Item {
 
                 Text {
                   id: box
+                  textFormat: Text.PlainText
                   text: row.done ? "󰄵" : "󰄱"
                   color: row.hasCursor ? root.selectedText : root.foreground
                   opacity: row.done ? 0.5 : 1
@@ -422,7 +512,8 @@ Item {
               visible: rowsModel.count === 0
               spacing: Style.space(8)
               Text {
-                text: "󰆐"
+                textFormat: Text.PlainText
+                text: root.storeError ? "󰀦" : "󰆐"
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
                 color: root.selectedText
@@ -432,7 +523,7 @@ Item {
               }
               Text {
                 textFormat: Text.PlainText
-                text: "Nothing captured yet"
+                text: root.storeError ? root.storeError : (root.storeLoaded ? "Nothing captured yet" : "")
                 color: root.foreground
                 opacity: 0.7
                 font.family: root.fontFamily
@@ -446,11 +537,15 @@ Item {
           id: hint
           textFormat: Text.PlainText
           width: parent.width
-          text: root.editingBlockIndex >= 0
-            ? "Editing · Enter save · Shift+Enter newline · Esc cancel"
-            : root.selectedIndex < 0
-              ? "Enter save · Shift+Enter newline · Tab list · Esc close"
-              : "Tab edit · Space done · Enter copy · Del remove · Esc close"
+          text: root.storeError
+            ? root.storeError + " · Esc close"
+            : root.editorTooLong
+              ? "Too long to save · at most " + root.entryMaxChars + " characters"
+              : root.editingBlockIndex >= 0
+                ? "Editing · Enter save · Shift+Enter newline · Esc cancel"
+                : root.selectedIndex < 0
+                  ? "Enter save · Shift+Enter newline · Tab list · Esc close"
+                  : "Tab edit · Space done · Enter copy · Del remove · Esc close"
           color: root.foreground
           opacity: 0.45
           font.family: root.fontFamily
