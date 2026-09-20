@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/scoop/omacopper/compare/v0.1.0...v0.2.0) (2026-09-20)
+
+
+### Features
+
+* **panel:** edit an entry in place with Tab ([c0e61d7](https://github.com/scoop/omacopper/commit/c0e61d7112e57a5401ffb64420f1c11e12318750))
+
 ## 0.1.0 (2026-09-20)
 
 
