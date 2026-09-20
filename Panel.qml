@@ -106,8 +106,8 @@ Item {
       root.storeError = "The file is too large to save"
       return false
     }
-    writeProc.payload = text
-    writeProc.running = true
+    writeProc.pending = text
+    writeProc.kick()
     return true
   }
 
@@ -187,12 +187,16 @@ Item {
     root.editingBlockIndex = -1
     editor.text = ""
     root.rebuildRows(blockIndex)
-    root.focusList(Math.max(0, root.selectedIndex))
+    // Deferred: this runs inside the editor's own key handler, and the
+    // TextArea takes focus back when that handler returns.
+    var row = Math.max(0, root.selectedIndex)
+    Qt.callLater(function() { root.focusList(row) })
   }
 
   function copyBack(row) {
     if (row < 0 || row >= rowsModel.count) return
     copyProc.payload = rowsModel.get(row).text
+    copyProc.stdinEnabled = true
     copyProc.running = true
     root.dismiss()
   }
@@ -248,14 +252,26 @@ Item {
     }
   }
 
+  // One write at a time. A save that arrives while one is in flight waits as
+  // `pending` and only the newest state is written; the file is the whole
+  // Store, so an intermediate version has nothing the final one lacks.
   BoundedProcess {
     id: writeProc
     maxBytes: 4096
     deadlineSeconds: 10
+    property string pending: ""
     property string payload: ""
     program: ["/usr/bin/python3", "-I", "-S", root.pluginDir + "bin/store.py", "write",
               root.storePath, String(root.storeMaxBytes)]
-    stdinEnabled: true
+    function kick() {
+      if (running || pending === "") return
+      payload = pending
+      pending = ""
+      // Closing stdin after a write clears the flag for good; every run
+      // has to open it again before it starts.
+      stdinEnabled = true
+      running = true
+    }
     onStarted: {
       write(payload)
       payload = ""
@@ -263,6 +279,7 @@ Item {
     }
     onFinishedWith: function(text, tooLarge) {
       if (lastExitCode !== 0) root.storeError = "Could not save the file"
+      else kick()
     }
   }
 
