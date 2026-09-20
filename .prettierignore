@@ -1,0 +1,4 @@
+# Written by release-please in its own style; not ours to format.
+CHANGELOG.md
+.release-please-manifest.json
+manifest.json
