@@ -6,7 +6,11 @@
     "author": "scoop",
     "description": "Quick-capture scratch list: one hotkey, one panel, one markdown file. Capture the selection, check it off, copy it back.",
     "license": "MIT",
-    "kinds": ["panel"],
+    "kinds": [
+        "panel"
+    ],
     "keepLoaded": true,
-    "entryPoints": { "panel": "Panel.qml" }
+    "entryPoints": {
+        "panel": "Panel.qml"
+    }
 }
