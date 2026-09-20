@@ -12,6 +12,10 @@ _Avoid_: Note, task, todo, item
 Creating an Entry from the Panel, prefilled from the primary selection when non-empty.
 _Avoid_: Clip, grab, save
 
+**Edit**:
+Replacing the text of an existing Entry from the Panel; its Done state and position are untouched.
+_Avoid_: Update, modify, rename
+
 **Panel**:
 The single floating UI summoned by the hotkey; where Capture, browsing, Done toggling and Copy-back happen.
 _Avoid_: Window, popup, overlay

@@ -211,6 +211,25 @@ function removeEntry(blocks, index) {
 }
 
 /**
+ * Edit: replace the text of the Entry at `index`, keeping its Done state.
+ * Blank text and non-Entry indexes leave the input untouched.
+ *
+ * @param {Array<Block>} blocks
+ * @param {number} index
+ * @param {string} text
+ * @returns {Array<Block>}
+ */
+function updateEntry(blocks, index, text) {
+    var clean = String(text || "")
+        .replace(/\r\n?/g, "\n")
+        .trim();
+    if (!clean || !blocks[index] || blocks[index].type !== "entry") return blocks;
+    var out = cloneBlocks(blocks);
+    out[index].text = clean;
+    return out;
+}
+
+/**
  * Rows in Panel order: Days newest first; within a Day newest first, with Done
  * Entries after open ones. `index` addresses the block for mutations.
  *
@@ -264,6 +283,7 @@ if (typeof module !== "undefined") {
         addEntry: addEntry,
         toggleDone: toggleDone,
         removeEntry: removeEntry,
+        updateEntry: updateEntry,
         displayRows: displayRows,
         dayLabel: dayLabel,
     };

@@ -5,6 +5,7 @@ import {
     addEntry,
     toggleDone,
     removeEntry,
+    updateEntry,
     displayRows,
     dayLabel,
 } from "../src/store.js";
@@ -174,4 +175,20 @@ test("dayLabel names today and yesterday, else the date", () => {
     expect(dayLabel("2026-08-31", "2026-09-01")).toBe("Yesterday");
     expect(dayLabel("2026-09-17", "2026-09-19")).toBe("2026-09-17");
     expect(dayLabel("2026-09-20", "2026-09-19")).toBe("2026-09-20");
+});
+
+// --- edit ---------------------------------------------------------------------
+
+test("updateEntry replaces the text of the addressed entry and keeps its done state", () => {
+    const blocks = parseStore("## 2026-09-19\n- [x] old text\n- [ ] other\n");
+    expect(serializeStore(updateEntry(blocks, 1, "new text\r\n  more  "))).toBe(
+        "## 2026-09-19\n- [x] new text\n    more\n- [ ] other\n",
+    );
+});
+
+test("updateEntry ignores blank text and non-entry indexes", () => {
+    const blocks = parseStore("## 2026-09-19\n- [ ] a\n");
+    expect(updateEntry(blocks, 1, "  \n")).toEqual(blocks);
+    expect(updateEntry(blocks, 0, "x")).toEqual(blocks);
+    expect(updateEntry(blocks, 9, "x")).toEqual(blocks);
 });

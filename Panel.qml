@@ -25,6 +25,8 @@ Item {
   property string storePath: Config.defaultStorePath(home)
   // -1 while the editor owns the keyboard; otherwise the row under the cursor.
   property int selectedIndex: -1
+  // Block index of the Entry loaded into the editor for an Edit, else -1.
+  property int editingBlockIndex: -1
 
   // Shares the [menu] surface tokens — themes that style the menu style this.
   property color background: Color.menu.background
@@ -47,6 +49,7 @@ Item {
   function open(payloadJson) {
     root.opened = true
     root.selectedIndex = -1
+    root.editingBlockIndex = -1
     editor.text = ""
     mkdirProc.running = true
     storeFile.reload()
@@ -117,6 +120,37 @@ Item {
     root.blocks = Store.removeEntry(root.blocks, rowsModel.get(row).blockIndex)
     root.saveStore()
     root.rebuildRows(-1)
+  }
+
+  function startEdit(row) {
+    if (row < 0 || row >= rowsModel.count) return
+    var item = rowsModel.get(row)
+    root.editingBlockIndex = item.blockIndex
+    editor.text = item.text
+    editor.cursorPosition = editor.length
+    root.focusEditor()
+  }
+
+  function commitEdit() {
+    var blockIndex = root.editingBlockIndex
+    var next = Store.updateEntry(root.blocks, blockIndex, editor.text)
+    if (next !== root.blocks) {
+      root.blocks = next
+      root.saveStore()
+    }
+    root.endEdit(blockIndex)
+  }
+
+  function cancelEdit() {
+    root.endEdit(root.editingBlockIndex)
+  }
+
+  // Leave the editor clean and put the cursor back on the Entry.
+  function endEdit(blockIndex) {
+    root.editingBlockIndex = -1
+    editor.text = ""
+    root.rebuildRows(blockIndex)
+    root.focusList(Math.max(0, root.selectedIndex))
   }
 
   function copyBack(row) {
@@ -241,14 +275,18 @@ Item {
 
             Keys.priority: Keys.BeforeItem
             Keys.onPressed: function(event) {
+              var editing = root.editingBlockIndex >= 0
               if (event.key === Qt.Key_Escape) {
-                root.dismiss()
+                if (editing) root.cancelEdit()
+                else root.dismiss()
                 event.accepted = true
               } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && !(event.modifiers & Qt.ShiftModifier)) {
-                root.capture()
+                if (editing) root.commitEdit()
+                else root.capture()
                 event.accepted = true
               } else if (event.key === Qt.Key_Tab) {
-                root.focusList(0)
+                if (editing) root.cancelEdit()
+                else root.focusList(0)
                 event.accepted = true
               } else if (event.key === Qt.Key_Down && editor.text === "") {
                 root.focusList(0)
@@ -281,7 +319,9 @@ Item {
               root.copyBack(root.selectedIndex)
             } else if (event.key === Qt.Key_Delete) {
               root.removeRow(root.selectedIndex)
-            } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+            } else if (event.key === Qt.Key_Tab) {
+              root.startEdit(root.selectedIndex)
+            } else if (event.key === Qt.Key_Backtab) {
               root.focusEditor()
             } else if (event.text && event.text.length === 1 && event.text.charCodeAt(0) >= 32 && event.text.charCodeAt(0) !== 127) {
               root.focusEditor()
@@ -406,9 +446,11 @@ Item {
           id: hint
           textFormat: Text.PlainText
           width: parent.width
-          text: root.selectedIndex < 0
-            ? "Enter save · Shift+Enter newline · Tab list · Esc close"
-            : "Space done · Enter copy · Del remove · Tab edit · Esc close"
+          text: root.editingBlockIndex >= 0
+            ? "Editing · Enter save · Shift+Enter newline · Esc cancel"
+            : root.selectedIndex < 0
+              ? "Enter save · Shift+Enter newline · Tab list · Esc close"
+              : "Tab edit · Space done · Enter copy · Del remove · Esc close"
           color: root.foreground
           opacity: 0.45
           font.family: root.fontFamily
