@@ -18,7 +18,7 @@ into your Obsidian vault.
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/scoop/omarchy-plugin-omacopper --enable
+omarchy plugin add https://github.com/scoop/omacopper --enable
 ```
 
 ## Keybinding

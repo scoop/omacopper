@@ -3,7 +3,7 @@
     "packages": {
         ".": {
             "release-type": "node",
-            "package-name": "omarchy-plugin-omacopper",
+            "package-name": "omacopper",
             "extra-files": [
                 {
                     "type": "json",
