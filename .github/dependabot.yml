@@ -2,7 +2,7 @@ version: 2
 updates:
     # Development tooling only — the plugin ships no runtime dependencies. It
     # runs on what Omarchy already provides: Quickshell, wl-clipboard.
-    - package-ecosystem: npm
+    - package-ecosystem: bun
       directory: /
       schedule:
           interval: weekly
