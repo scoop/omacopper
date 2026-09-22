@@ -1,12 +1,7 @@
 version: 2
 updates:
-    # Development tooling only — the plugin ships no runtime dependencies. It
-    # runs on what Omarchy already provides: Quickshell, wl-clipboard.
-    - package-ecosystem: bun
-      directory: /
-      schedule:
-          interval: weekly
-      open-pull-requests-limit: 5
+    # npm dev tooling is updated by .github/workflows/bun-update.yml instead:
+    # Dependabot's bun cannot read the lockfileVersion 2 that Bun 1.4.2 writes.
     - package-ecosystem: github-actions
       directory: /
       schedule:
