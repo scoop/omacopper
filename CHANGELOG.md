@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.0](https://github.com/scoop/omacopper/compare/v0.2.0...v0.3.0) (2026-09-22)
+
+
+### Features
+
+* **panel:** save an edit on Tab instead of discarding it ([eb3532f](https://github.com/scoop/omacopper/commit/eb3532fc7f75946e095744c8c9f938d30fe9dd32))
+
+
+### Bug Fixes
+
+* close the remaining review findings before submission ([2ac05d4](https://github.com/scoop/omacopper/commit/2ac05d467d1462175c253f7216f6e9e8d911dac4))
+* harden file, process and clipboard handling for marketplace review ([7786e31](https://github.com/scoop/omacopper/commit/7786e31c34056a9dff26e2b781b7c1a58fd26aa9))
+* **panel:** second save in a session failed, and focus stayed in the editor after an edit ([eab7ac4](https://github.com/scoop/omacopper/commit/eab7ac41c8110e080904cf50ac2b35610108be84))
+
 ## [0.2.0](https://github.com/scoop/omacopper/compare/v0.1.0...v0.2.0) (2026-09-20)
 
 
