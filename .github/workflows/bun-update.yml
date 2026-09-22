@@ -1,0 +1,74 @@
+name: Bun update
+
+# Replaces Dependabot for npm dev tooling: Dependabot's bun cannot read the
+# lockfileVersion 2 that Bun 1.4.2 writes (#6). The plugin ships no runtime
+# dependencies, so this only ever touches development tooling.
+
+on:
+    schedule:
+        - cron: "0 6 * * 1"
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: bun-update
+    cancel-in-progress: false
+
+jobs:
+    update:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version: 1.4.2
+
+            # Resolves and rewrites package.json and bun.lock only: nothing is
+            # installed and no package code runs before the token is in play.
+            - name: Update
+              run: bun update --latest --lockfile-only --ignore-scripts
+
+            # A PAT rather than github.token: PRs opened with the default token
+            # get no CI runs. gh hands it to git as a credential helper, so it
+            # never appears in argv or a remote URL.
+            - name: Open or update PR
+              env:
+                  GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+                  BRANCH: deps/bun-update
+              run: |
+                  set -euo pipefail
+
+                  if git diff --quiet -- package.json bun.lock; then
+                    echo "dependencies up to date"
+                    exit 0
+                  fi
+
+                  gh auth setup-git
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+                  git switch -C "$BRANCH"
+                  git commit -m "chore(deps): update bun dev dependencies" -- package.json bun.lock
+                  git push --force origin "$BRANCH"
+
+                  if [[ -n "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number')" ]]; then
+                    echo "open PR updated"
+                    exit 0
+                  fi
+
+                  {
+                    echo "Weekly \`bun update --latest\` (Bun 1.4.2). Replaces Dependabot, see #6."
+                    echo
+                    echo '```diff'
+                    git diff HEAD~1 -- package.json | grep -E '^[-+] ' || echo "lockfile only"
+                    echo '```'
+                  } > "$RUNNER_TEMP/body.md"
+
+                  gh pr create --base main --head "$BRANCH" \
+                    --title "chore(deps): update bun dev dependencies" \
+                    --body-file "$RUNNER_TEMP/body.md"
