@@ -14,10 +14,10 @@
         "@commitlint/cli": "^21.2.3",
         "@commitlint/config-conventional": "^21.2.3",
         "@eslint/js": "^10.0.1",
-        "eslint": "^10.11.0",
+        "eslint": "^10.12.0",
         "husky": "^9.1.7",
         "lint-staged": "^17.6.0",
-        "prettier": "^3.9.9",
+        "prettier": "^3.9.10",
         "typescript": "^7.0.2"
     },
     "lint-staged": {
