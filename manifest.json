@@ -2,7 +2,7 @@
     "schemaVersion": 1,
     "id": "scoop.omacopper",
     "name": "Omacopper",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "author": "scoop",
     "description": "Quick-capture scratch list: one hotkey, one panel, one markdown file. Capture the selection, check it off, copy it back.",
     "license": "MIT",
